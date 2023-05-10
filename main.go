@@ -109,6 +109,11 @@ func (cli *CommandLine) run() {
 		if err != nil {
 			log.Panic(err)
 		}
+	case "send":
+		err := sendCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
 	default:
 		cli.printUsage()
 		runtime.Goexit()
