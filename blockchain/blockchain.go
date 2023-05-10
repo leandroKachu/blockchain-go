@@ -12,7 +12,7 @@ import (
 const (
 	dbPath      = "./tmp/blocks"
 	dbFile      = "./tmp/blocks/MANIFEST"
-	genesisData = "First block generation"
+	genesisData = "First Transaction from Genesis"
 )
 
 type Blockchain struct {
@@ -29,16 +29,16 @@ func DBexists() bool {
 	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
 		return false
 	}
+
 	return true
 }
 
 func ContinueBlockchain(address string) *Blockchain {
-	if !DBexists() {
-		fmt.Println("dont exists blockchain, please create it")
+	if DBexists() == false {
+		fmt.Println("No existing Blockchain found, please create one!")
 		runtime.Goexit()
 	}
 	var lastHash []byte
-
 	opts := badger.DefaultOptions(dbPath)
 	opts.Dir = dbPath
 	opts.ValueDir = dbPath
@@ -49,7 +49,6 @@ func ContinueBlockchain(address string) *Blockchain {
 	err = db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte("lh"))
 		Handler(err)
-
 		err1 := item.Value(func(val []byte) error {
 			lastHash = append([]byte{}, val...)
 			return nil
@@ -64,9 +63,97 @@ func ContinueBlockchain(address string) *Blockchain {
 
 }
 
+func InitBlockchain(address string) *Blockchain {
+	var lastHash []byte
+
+	if DBexists() {
+		fmt.Println("Blockchain already exists")
+		runtime.Goexit()
+	}
+	opts := badger.DefaultOptions(dbPath)
+	opts.Dir = dbPath
+	opts.ValueDir = dbPath
+
+	db, err := badger.Open(opts)
+
+	Handler(err)
+
+	err = db.Update(func(txn *badger.Txn) error {
+		cbtx := CoinBaseTx(address, genesisData)
+		genesis := Genesis(cbtx)
+		fmt.Println("Genesis created")
+		err = txn.Set(genesis.Hash, genesis.Serialize())
+		Handler(err)
+		err = txn.Set([]byte("lh"), genesis.Hash)
+		lastHash = genesis.Hash
+		return err
+
+	})
+	Handler(err)
+	blockchain := Blockchain{lastHash, db}
+	return &blockchain
+
+}
+
+func (chain *Blockchain) AddBlock(transactions []*Transaction) {
+	var lastHash []byte
+	err := chain.Database.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte("lh"))
+		Handler(err)
+		err1 := item.Value(func(val []byte) error {
+			lastHash = append([]byte{}, val...)
+			return nil
+		})
+
+		Handler(err1)
+
+		return err
+	})
+
+	Handler(err)
+	newBlock := CreateBlock(transactions, lastHash)
+
+	err = chain.Database.Update(func(txn *badger.Txn) error {
+		err := txn.Set(newBlock.Hash, newBlock.Serialize())
+		Handler(err)
+		err = txn.Set([]byte("lh"), newBlock.Hash)
+
+		chain.LastHash = newBlock.Hash
+		return err
+	})
+
+	Handler(err)
+}
+
+func (chain *Blockchain) Iterator() *BlockchainIterator {
+	iter := &BlockchainIterator{chain.LastHash, chain.Database}
+
+	return iter
+}
+
+func (iter *BlockchainIterator) Next() *Block {
+	var block *Block
+	var blockData []byte
+	err := iter.Database.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(iter.CurrentHash)
+		Handler(err)
+		err1 := item.Value(func(val []byte) error {
+			blockData = append([]byte{}, val...)
+			return nil
+		})
+		Handler(err1)
+		block = Deserialize(blockData)
+		return err
+	})
+	Handler(err)
+	iter.CurrentHash = block.PrevHash
+	return block
+}
+
 func (chain *Blockchain) FindUnspentTransactions(address string) []Transaction {
 	var unspentTxs []Transaction
 	spentTxOs := make(map[string][]int)
+
 	iter := chain.Iterator()
 
 	for {
@@ -89,15 +176,18 @@ func (chain *Blockchain) FindUnspentTransactions(address string) []Transaction {
 				}
 
 			}
-			if !tx.IsCoinbase() {
+
+			if tx.IsCoinbase() == false {
 				for _, in := range tx.Inputs {
 					if in.CanUnlock(address) {
 						inTxID := hex.EncodeToString(in.ID)
 						spentTxOs[inTxID] = append(spentTxOs[inTxID], in.Out)
+
 					}
 				}
 			}
 		}
+
 		if len(block.PrevHash) == 0 {
 			break
 		}
@@ -108,12 +198,14 @@ func (chain *Blockchain) FindUnspentTransactions(address string) []Transaction {
 
 func (chain *Blockchain) FindUTXO(address string) []TxOutput {
 	var UTXOs []TxOutput
-	unspentTrnsactions := chain.FindUnspentTransactions(address)
+	unspentTransactions := chain.FindUnspentTransactions(address)
 
-	for _, tx := range unspentTrnsactions {
+	for _, tx := range unspentTransactions {
 		for _, out := range tx.Outputs {
 			if out.CanBeUnlocked(address) {
+
 				UTXOs = append(UTXOs, out)
+
 			}
 		}
 	}
@@ -138,99 +230,9 @@ Work:
 					break Work
 				}
 			}
+
 		}
-
 	}
+
 	return accumulated, unspentOuts
-}
-
-func InitBlockchain(address string) *Blockchain {
-	var lastHash []byte
-
-	if DBexists() {
-		fmt.Println("blockchain already exists")
-		runtime.Goexit()
-
-	}
-	opts := badger.DefaultOptions(dbPath)
-	opts.Dir = dbPath
-	opts.ValueDir = dbPath
-
-	db, err := badger.Open(opts)
-	Handler(err)
-
-	err = db.Update(func(txn *badger.Txn) error {
-		cbtx := CoinBaseTx(address, genesisData)
-		genesis := Genesis(cbtx)
-
-		fmt.Println("Gnesis created")
-		err = txn.Set(genesis.Hash, genesis.Serialize())
-		Handler(err)
-
-		err = txn.Set([]byte("lh"), genesis.Hash)
-		lastHash = genesis.Hash
-		return err
-
-	})
-	Handler(err)
-
-	blockchain := Blockchain{lastHash, db}
-	return &blockchain
-}
-
-func (chain *Blockchain) AddBlock(transactions []*Transaction) {
-	var lastHash []byte
-
-	err := chain.Database.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte("lh"))
-		Handler(err)
-
-		err1 := item.Value(func(val []byte) error {
-			lastHash = append([]byte{}, val...)
-			return nil
-		})
-
-		Handler(err1)
-		return err
-	})
-	Handler(err)
-	newBlock := CreateBlock(transactions, lastHash)
-
-	err = chain.Database.Update(func(txn *badger.Txn) error {
-		err := txn.Set(newBlock.Hash, newBlock.Serialize())
-		Handler(err)
-		err = txn.Set([]byte("lh"), newBlock.Hash)
-		chain.LastHash = newBlock.Hash
-		return err
-
-	})
-	Handler(err)
-}
-
-func (chain *Blockchain) Iterator() *BlockchainIterator {
-	iter := &BlockchainIterator{chain.LastHash, chain.Database}
-	return iter
-}
-
-func (iter *BlockchainIterator) Next() *Block {
-	var block *Block
-
-	var blockData []byte
-
-	err := iter.Database.View(func(txn *badger.Txn) error {
-		item, err := txn.Get(iter.CurrentHash)
-		Handler(err)
-		err1 := item.Value(func(val []byte) error {
-			blockData = append([]byte{}, val...)
-			return nil
-		})
-		Handler(err1)
-
-		block = Deserialize(blockData)
-		return err
-	})
-
-	Handler(err)
-	iter.CurrentHash = block.PrevHash
-	return block
 }
