@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/tensor-programming/golang-blockchain/blockchain"
+	"github.com/tensor-programming/golang-blockchain/wallet"
 )
 
 type CommandLine struct{}
@@ -19,6 +20,9 @@ func (cli *CommandLine) printUsage() {
 	fmt.Println("createBlokchain -address ADDRESS - creates a blockchain")
 	fmt.Println("printchain - Prints the blocks in the chain")
 	fmt.Println("send -from FROM -to TO -amount AMOUNT -  Send amount from to")
+	fmt.Println("createwallet  - creates a new wallet")
+	fmt.Println("listaddresses  - list all addresses in our wallet")
+
 }
 
 func (cli *CommandLine) validateArgs() {
@@ -28,6 +32,25 @@ func (cli *CommandLine) validateArgs() {
 			runtime.Goexit()
 		}
 	}
+}
+
+func (cli *CommandLine) listAddresses() {
+	wallets, _ := wallet.CreateWallets()
+	addresses := wallets.GetAllAddress()
+
+	for _, address := range addresses {
+		fmt.Printf(address)
+
+	}
+}
+
+func (cli *CommandLine) createWallet() {
+	wallets, _ := wallet.CreateWallets()
+	address := wallets.AddWallet()
+	wallets.SaveFile()
+
+	fmt.Printf("New address: %s\n", address)
+
 }
 
 func (cli *CommandLine) printChain() {
@@ -86,6 +109,8 @@ func (cli *CommandLine) Run() {
 	createBlockchainCmd := flag.NewFlagSet("createblockchain", flag.ExitOnError)
 	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
+	createWalletCmd := flag.NewFlagSet("createwallet", flag.ExitOnError)
+	listaddressesCmd := flag.NewFlagSet("listaddresses", flag.ExitOnError)
 
 	getBalanceAddress := getBalanceCmd.String("address", "", "address of wallet")
 	createBlockchainAddress := createBlockchainCmd.String("address", "", "address of miner")
@@ -114,6 +139,16 @@ func (cli *CommandLine) Run() {
 		if err != nil {
 			log.Panic(err)
 		}
+	case "createwallet":
+		err := createWalletCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "listaddresses":
+		err := listaddressesCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
 	default:
 		cli.printUsage()
 		runtime.Goexit()
@@ -139,6 +174,15 @@ func (cli *CommandLine) Run() {
 
 	if printChainCmd.Parsed() {
 		cli.printChain()
+
+	}
+
+	if createWalletCmd.Parsed() {
+		cli.createWallet()
+
+	}
+	if listaddressesCmd.Parsed() {
+		cli.listAddresses()
 
 	}
 
